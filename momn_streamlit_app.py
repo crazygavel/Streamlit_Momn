@@ -133,17 +133,25 @@ def app_content():
 
         return beta
 
+    def calculate_z_score(data):
+        mean = data.mean()
+        std = data.std()
+        z_score = (data - mean) / std
+        return z_score.round(2) # Round Z-scores to 2 decimal places
+
     st.title("Momentum Ranking App")
 
     import warnings
     warnings.simplefilter(action='ignore', category=FutureWarning)
 
     ranking_options = {
+        "AvgZScore 12M/6M/3M": "avgZScore12_6_3",  # New ranking method
+        "AvgZScore 12M/9M/6M/3M": "avgZScore12_9_6_3",
         "AvgSharpe 12M/6M/3M": "avgSharpe12_6_3",
         "AvgSharpe 9M/6M/3M": "avgSharpe9_6_3",
         "AvgSharpe 12M/9M/6M/3M": "avg_All",
         "Sharpe12M": "sharpe12M",
-        "Sharpe3M": "sharpe3M"
+        "Sharpe3M": "sharpe3M"        
     }
 
     ranking_method_display = st.selectbox(
@@ -419,8 +427,20 @@ def app_content():
         dfStats['sharpe9M'] = getSharpeRoC(dfStats['roc9M'], dfStats['vol9M'])
         dfStats['sharpe6M'] = getSharpeRoC(dfStats['roc6M'], dfStats['vol6M'])
         dfStats['sharpe3M'] = getSharpeRoC(dfStats['roc3M'], dfStats['vol3M'])
+
+        # Calculate Z-scores for Sharpe ratios
+        dfStats['z_score12M'] = calculate_z_score(dfStats['sharpe12M'])
+        dfStats['z_score9M'] = calculate_z_score(dfStats['sharpe9M'])
+        dfStats['z_score6M'] = calculate_z_score(dfStats['sharpe6M'])
+        dfStats['z_score3M'] = calculate_z_score(dfStats['sharpe3M'])
     
         # ****************************************
+        # Handle Nan and inf values to zero(0)
+        for column in ['sharpe12M', 'sharpe9M', 'sharpe6M', 'sharpe3M']:
+            dfStats[column] = dfStats[column].replace([np.inf, -np.inf], np.nan).fillna(0)
+        for column in ['z_score12M', 'z_score9M', 'z_score6M', 'z_score3M']:
+            dfStats[column] = dfStats[column].replace([np.inf, -np.inf], np.nan).fillna(0)
+            
         # Columns for different ranking methods
         columns_avgSharpe12_6_3 = ["sharpe12M", "sharpe6M", "sharpe3M"]
         columns_avgAll = ["sharpe12M", "sharpe9M", "sharpe6M", "sharpe3M"]
@@ -433,6 +453,11 @@ def app_content():
             dfStats['avg_All'] = dfStats[columns_avgAll].mean(axis=1).round(2)
         elif ranking_method == "avgSharpe9_6_3":  # New logic
             dfStats['avgSharpe9_6_3'] = dfStats[columns_avgSharpe9_6_3].mean(axis=1).round(2)
+        elif ranking_method == "avgZScore12_6_3":  # New logic for Z-score ranking
+            dfStats['avgZScore12_6_3'] = dfStats[['z_score12M', 'z_score6M', 'z_score3M']].mean(axis=1).round(2)
+        elif ranking_method == "avgZScore12_9_6_3":
+            dfStats['avgZScore12_9_6_3'] = dfStats[['z_score12M', 'z_score9M', 'z_score6M', 'z_score3M']].mean(axis=1).round(2)
+
         # ******************************************
     
         dfStats['volm_cr'] = (getMedianVolume(volume12M) / 1e7).round(2)
@@ -471,8 +496,10 @@ def app_content():
             dfStats['avg_All'] = dfStats['avg_All'].replace([np.inf, -np.inf], np.nan).fillna(0)
         elif ranking_method == "avgSharpe9_6_3":  # New handling
             dfStats['avgSharpe9_6_3'] = dfStats['avgSharpe9_6_3'].replace([np.inf, -np.inf], np.nan).fillna(0)
-        dfStats['sharpe12M'] = dfStats['sharpe12M'].replace([np.inf, -np.inf], np.nan).fillna(0)
-        dfStats['sharpe3M'] = dfStats['sharpe3M'].replace([np.inf, -np.inf], np.nan).fillna(0)
+        elif ranking_method == "avgZScore12_6_3":  # New handling for Z-score ranking
+            dfStats['avgZScore12_6_3'] = dfStats['avgZScore12_6_3'].replace([np.inf, -np.inf], np.nan).fillna(0)
+        elif ranking_method == "avgZScore12_9_6_3":  # New handling for Z-score ranking
+            dfStats['avgZScore12_9_6_3'] = dfStats['avgZScore12_9_6_3'].replace([np.inf, -np.inf], np.nan).fillna(0)
     
         # Add Rank column based on 'avgSharpe' and sort by Rank
         # dfStats['Rank'] = dfStats[ranking_method].rank(ascending=False,method='first').astype(int)
@@ -486,7 +513,13 @@ def app_content():
             dfStats = dfStats.sort_values(by=[ranking_method, 'roc3M'], ascending=[False, False])
         elif ranking_method == "avgSharpe9_6_3":  # New sorting rule
             dfStats = dfStats.sort_values(by=[ranking_method, 'roc6M'], ascending=[False, False])
-    
+        elif ranking_method == "avgZScore12_6_3":  # New sorting rule for Z-score ranking
+            dfStats = dfStats.sort_values(by=[ranking_method, 'roc3M'], ascending=[False, False])
+        elif ranking_method == "avgZScore12_9_6_3":  # New sorting rule for Z-score ranking
+            dfStats = dfStats.sort_values(by=[ranking_method, 'roc6M'], ascending=[False, False])
+
+        #********************************************
+
         # Assign unique ranks based on the sorted order
         dfStats['Rank'] = range(1, len(dfStats) + 1)
     
@@ -790,7 +823,7 @@ def app_content():
         top_rank_tickers = filtered[filtered.index <= rank_threshold]['Ticker']
         
         # Fetch the current portfolio from the published CSV (Nifty50 Value)
-        portfolio_url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxQTHDMAMQfis_Fpaf8wvm4Rd5F35RAH1-lDc3SIkZsnxwwUzTUAAvHi7yoOEHMUfwKdlMoLgjFPuq/pub?output=csv"
+        portfolio_url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS4HDgiell4n1kd08OnlzOQobfPzeDtVyWJ8gETFlYbz27qhOmfqKZOoIXZItRQEq5ANATYIcZJm0gk/pub?output=csv"
         
         # Start the spinner to indicate the process is running
         with st.spinner("Portfolio Rebalancing... Please wait..."):
